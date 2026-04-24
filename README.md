@@ -1,44 +1,199 @@
 # Quiz Leaderboard System
+**SRM Internship Assignment — Bajaj Finserv Health**
 
-This project is a backend integration solution designed to consume API responses from an external validator system, process them by handling duplicates, and generate a final leaderboard.
+---
 
-## Problem Overview
-The system simulates a quiz show where multiple participants receive scores across different rounds. The challenge involves:
-1. **Polling**: Fetching data from a REST API across 10 consecutive polls with a mandatory delay.
-2. **Deduplication**: Ensuring that scores for the same `roundId` and `participant` are only counted once, even if they appear in multiple polls.
-3. **Aggregation**: Summing up the unique scores for each participant.
-4. **Leaderboard Generation**: Sorting participants by their total scores in descending order.
-5. **Submission**: Posting the final leaderboard back to the validator.
+## Problem Statement
 
-## Features
-- **Automated Polling**: Sequentially calls the API from poll index 0 to 9.
-- **Robust Deduplication**: Uses a composite key `(roundId, participant)` to identify and ignore duplicate entries.
-- **Accurate Aggregation**: Correctly calculates the total score across all unique events.
-- **Sorted Leaderboard**: Generates a leaderboard sorted by `totalScore` as required.
-- **Submission Logic**: Sends the final result to the `/quiz/submit` endpoint.
+A quiz validator API delivers participant scores across 10 polls. The same event data may appear in multiple polls (duplicates). The goal is to:
 
-## API Details
-- **Base URL**: `https://devapigw.vidalhealthtpa.com/srm-quiz-task`
-- **Endpoints**:
-    - `GET /quiz/messages`: Fetches quiz events for a specific registration number and poll index.
-    - `POST /quiz/submit`: Submits the final aggregated leaderboard.
+1. Poll the API 10 times (with a 5-second delay between each)
+2. Deduplicate events using `roundId + participant` as the unique key
+3. Aggregate scores per participant
+4. Submit a correctly sorted leaderboard exactly once
 
-## How to Run
-1. Ensure you have Python 3 installed.
-2. Install the `requests` library:
-   ```bash
-   pip install requests
-   ```
-3. Run the script:
-   ```bash
-   python quiz_leaderboard.py
-   ```
+---
 
-## Implementation Logic
-The core logic resides in `quiz_leaderboard.py`:
-- **`poll_api()`**: Manages the 10-step polling process and implements a 5-second sleep between requests. It uses a Python `set` to track seen `(roundId, participant)` pairs.
-- **`aggregate_scores()`**: Uses a dictionary to sum scores per participant and then converts it to a sorted list of objects.
-- **`submit_leaderboard()`**: Constructs the final JSON payload and performs the POST request.
+## My Result
 
-## Submission Result
-Upon execution, the system produces a leaderboard and submits it. A successful submission returns a response indicating the `submittedTotal` and verification status.
+| Field | Value |
+|---|---|
+| Participants | 3 (Bob, Alice, Charlie) |
+| Unique events | 9 |
+| Duplicate events dropped | 6 |
+| Grand total submitted | **835** |
+| HTTP status | 200 ✅ |
+
+**Final Leaderboard:**
+| Rank | Participant | Total Score |
+|---|---|---|
+| 1 | Bob | 295 |
+| 2 | Alice | 280 |
+| 3 | Charlie | 260 |
+
+---
+
+## How It Works
+
+### Step 1 — Poll 10 times
+```
+GET /quiz/messages?regNo=2024CS101&poll=0
+GET /quiz/messages?regNo=2024CS101&poll=1
+...
+GET /quiz/messages?regNo=2024CS101&poll=9
+```
+A mandatory **5-second delay** is maintained between each poll.
+
+### Step 2 — Deduplicate
+Every event is identified by a unique key:
+```
+key = roundId + "|" + participant
+```
+This key is stored in a Python `set`. If the same key appears again in a later poll, it is silently ignored.
+
+**Example:**
+```
+Poll 0 → Alice R1 +10   → key "R1|Alice" not seen → COUNT IT   ✅
+Poll 2 → Alice R1 +10   → key "R1|Alice" already seen → SKIP   ❌
+```
+
+### Step 3 — Aggregate & Sort
+Unique scores are summed per participant, then sorted by `totalScore` descending.
+
+### Step 4 — Submit once
+```
+POST /quiz/submit
+{
+  "regNo": "2024CS101",
+  "leaderboard": [
+    { "participant": "Bob",     "totalScore": 295 },
+    { "participant": "Alice",   "totalScore": 280 },
+    { "participant": "Charlie", "totalScore": 260 }
+  ]
+}
+```
+
+---
+
+## Tech Stack
+
+- **Language:** Python 3
+- **Library:** `requests` (only external dependency)
+- No frameworks, no databases — pure Python
+
+---
+
+## Setup & Run
+
+**1. Install dependency**
+```bash
+pip install requests
+```
+
+**2. Set your registration number** in `quiz_leaderboard.py` (line 12):
+```python
+REG_NO = "2024CS101"   # change to your reg number
+```
+
+**3. Run**
+```bash
+python quiz_leaderboard.py
+```
+
+---
+
+## Sample Output
+
+```
+=== Quiz Leaderboard System ===
+regNo     : 2024CS101
+Base URL  : https://devapigw.vidalhealthtpa.com/srm-quiz-task
+Polls     : 10  (5s delay between each)
+
+Poll 00: 2 events received — 2 new, 0 duplicates dropped
+  Waiting 5s before next poll...
+Poll 01: 1 events received — 1 new, 0 duplicates dropped
+  Waiting 5s before next poll...
+Poll 02: 2 events received — 1 new, 1 duplicates dropped
+  ...
+Poll 09: 1 events received — 0 new, 1 duplicates dropped
+
+--- Leaderboard (3 participants) ---
+   1. Bob                  295
+   2. Alice                280
+   3. Charlie              260
+     Grand total : 835
+     Raw events  : 15
+     Unique      : 9
+
+Submitting leaderboard...
+  [DEBUG] Submit status code : 200
+  [DEBUG] Raw response       : {"regNo":"2024CS101","totalPollsMade":4249,"submittedTotal":835,"attemptCount":372}
+
+=== Submit Result ===
+  regNo                : 2024CS101
+  totalPollsMade       : 4249
+  submittedTotal       : 835
+  attemptCount         : 372
+
+✓ Success!
+```
+
+---
+
+## File Structure
+
+```
+├── quiz_leaderboard.py   # main solution
+└── README.md             # this file
+```
+
+---
+
+## API Reference
+
+**Base URL:** `https://devapigw.vidalhealthtpa.com/srm-quiz-task`
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/quiz/messages` | GET | Fetch events for a poll index (0–9) |
+| `/quiz/submit` | POST | Submit the final leaderboard |
+
+**Poll request:**
+```
+GET /quiz/messages?regNo=2024CS101&poll=0
+```
+
+**Poll response:**
+```json
+{
+  "regNo": "2024CS101",
+  "setId": "SET_1",
+  "pollIndex": 0,
+  "events": [
+    { "roundId": "R1", "participant": "Alice", "score": 10 },
+    { "roundId": "R1", "participant": "Bob",   "score": 20 }
+  ]
+}
+```
+
+**Submit request:**
+```json
+{
+  "regNo": "2024CS101",
+  "leaderboard": [
+    { "participant": "Bob",   "totalScore": 295 },
+    { "participant": "Alice", "totalScore": 280 }
+  ]
+}
+```
+
+**Submit response:**
+```json
+{
+  "regNo": "2024CS101",
+  "totalPollsMade": 4249,
+  "submittedTotal": 835,
+  "attemptCount": 372
+}
+```
